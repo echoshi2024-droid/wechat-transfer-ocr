@@ -20,15 +20,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-glx libglib2.0-0
-
-      - name: Install Python dependencies
+      - name: Install Flet
         run: |
           python -m pip install --upgrade pip
-          pip install flet paddleocr paddlepaddle Pillow
+          pip install flet
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -39,21 +34,57 @@ jobs:
       - name: Verify Flutter
         run: flutter --version
 
-      - name: Build APK
+      - name: Create simple app
         run: |
-          mkdir -p assets
-          flet build apk --include-packages flet,paddleocr,paddlepaddle,PIL
+          cat > app.py << 'EOF'
+          import flet as ft
+          import re
 
-      - name: List build output
-        run: ls -la build/ || echo "No build directory"
-        continue-on-error: true
+          def main(page: ft.Page):
+              page.title = "微信转账金额识别"
+              
+              title = ft.Text("💰 微信转账金额识别", size=28, weight=ft.FontWeight.BOLD)
+              
+              input_field = ft.TextField(
+                  label="输入金额（多个用逗号分隔）",
+                  hint_text="例如: ¥25.00, ¥6.90",
+                  width=400
+              )
+              
+              result = ft.Text("", size=20)
+              total = ft.Text("", size=24, color="green", weight=ft.FontWeight.BOLD)
+              
+              def calculate(e):
+                  text = input_field.value
+                  pattern = r'[¥￥]\s*(\d+\.?\d*)'
+                  amounts = [float(m) for m in re.findall(pattern, text)]
+                  if amounts:
+                      result.value = "识别到的金额:\n" + "\n".join([f"¥{a:.2f}" for a in amounts])
+                      total.value = f"总金额: ¥{sum(amounts):.2f}"
+                  else:
+                      result.value = "未识别到金额"
+                      total.value = ""
+                  page.update()
+              
+              btn = ft.ElevatedButton("计算总金额", on_click=calculate)
+              
+              page.add(title, ft.Divider(), input_field, btn, ft.Divider(), result, total)
+          
+          ft.app(target=main)
+          EOF
+
+      - name: Build APK
+        run: flet build apk app.py
+
+      - name: Find APK
+        run: |
+          find . -name "*.apk" -type f
+          ls -la build/apk/release/ || true
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-release
           path: |
-            build/apk/**/*.apk
-            build/**/*.apk
+            **/*.apk
           retention-days: 30
-          if-no-files-found: warn
